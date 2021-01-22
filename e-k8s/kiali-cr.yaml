@@ -63,6 +63,7 @@ spec:
 # that component's namespace in istio_component_namespaces.
 #  ---
 #  istio_namespace: ""
+  istio_namespace: "istio-system"
 
 ##########
 # The version of the Ansible playbook to execute in order to install that version of Kiali.
@@ -359,7 +360,7 @@ spec:
 
   deployment:
     ingress_enabled: false
-    namespace: "istio-system"
+    namespace: "monitoring"
 
 ##########
 #  ---
@@ -478,7 +479,7 @@ spec:
     grafana:
       auth:
         type: none
-      in_cluster_url: "http://c756-grafana.istio-system.svc.cluster.local:80"
+      in_cluster_url: "http://c756-grafana.monitoring.svc.cluster.local:80"
 
 # **Istio-specific settings:
 # component_status:
@@ -565,7 +566,7 @@ spec:
     prometheus:
       auth:
         type: none
-      url: http://c756-kube-prometheus-stack-prometheus.istio-system.svc.cluster.local:9090
+      url: http://c756-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
 
 #
 # **Tracing-specific settings:

@@ -6,8 +6,6 @@
 # All vendor-specific commands are in the make file for that vendor:
 # az.mak, eks.mak, gcp.mak, mk.mak
 #
-# This file addresses APPPLing the Deployment, Service, Gateway, and VirtualService
-#
 # Be sure to set your context appropriately for the log monitor.
 #
 # The intended approach to working with this makefile is to update select
@@ -29,6 +27,7 @@ KC=kubectl
 DK=docker
 AWS=aws
 IC=istioctl
+HELM=helm
 
 # Application versions
 # Override these by environment variables and `make -e`
@@ -57,6 +56,10 @@ SIM_FULL_NAME=$(SIM_PACKAGE).$(SIM_NAME)
 # but which you might override as projects become sophisticated
 APP_NS=c756ns
 ISTIO_NS=istio-system
+KIALI_OP_NS=kiali-operator
+MONITOR_NS=monitoring
+MONITOR_NS_INJECTION=disabled
+MON_RELEASE=c756
 
 # ----------------------------------------------------------------------------------------
 # -------  Targets to be invoked directly from command line                        -------
@@ -192,12 +195,12 @@ registry-login:
 
 # --- Variables defined for URL targets
 # Utility to get the hostname (AWS) or ip (everyone else) of a load-balanced service
-# Must be followed by a service
-IP_GET_CMD=tools/getip.sh $(KC) $(ISTIO_NS)
+# Must be followed by a namespace and a service
+IP_GET_CMD=tools/getip.sh $(KC)
 
 # This expression is reused several times
 # Use back-tick for subshell so as not to confuse with make $() variable notation
-INGRESS_IP=`$(IP_GET_CMD) svc/istio-ingressgateway`
+INGRESS_IP=`$(IP_GET_CMD) $(ISTIO_NS) svc/istio-ingressgateway`
 
 # --- kiali-url: Print the URL to browse Kiali in current cluster
 kiali-url:
@@ -206,12 +209,12 @@ kiali-url:
 # --- grafana-url: Print the URL to browse Grafana in current cluster
 grafana-url:
 	@# Use back-tick for subshell so as not to confuse with make $() variable notation
-	@/bin/sh -c 'echo http://`$(IP_GET_CMD) svc/grafana-ingress`:3000/'
+	@/bin/sh -c 'echo http://`$(IP_GET_CMD) $(MONITOR_NS) svc/grafana-ingress`:3000/'
 
 # --- prometheus-url: Print the URL to browse Prometheus in current cluster
 prometheus-url:
 	@# Use back-tick for subshell so as not to confuse with make $() variable notation
-	@/bin/sh -c 'echo http://`$(IP_GET_CMD) svc/prom-ingress`:9090/'
+	@/bin/sh -c 'echo http://`$(IP_GET_CMD) $(MONITOR_NS) svc/prom-ingress`:9090/'
 
 # --- Variables defined for Gatling targets
 #
@@ -226,32 +229,61 @@ GAT_SUFFIX=2>&1 | head -18 &
 # Less convenient than gatling-music or gatling-user (below) but the resulting commands
 # from this target are listed by `jobs` and thus easy to kill.
 gatling-command:
-	@/bin/sh -c 'echo "CLUSTER_IP=$(INGRESS_IP) USERS=1 SIM_NAME=ReadMusicSim make -e -f k8s.mak gatling $(GAT_SUFFIX)"'
+	@/bin/sh -c 'echo "CLUSTER_IP=$(INGRESS_IP) USERS=1 SIM_NAME=ReadMusicSim make -e -f k8s.mak run-gatling $(GAT_SUFFIX)"'
+
+# --- kiali-svc-token: Get the token
+# SAMPLE:  Has embedded secret name!!!
+kiali-svc-token:
+	$(KC) -n $(MONITOR_NS) get secret/kiali-service-account-token-vt6q5 -o jsonpath='{.data.token}' | base64 -d -
 
 # ----------------------------------------------------------------------------------------
 # ------- Targets called by above. Not normally invoked directly from command line -------
-# ------- Note that some subtargets are in `obs.mak`                               -------
 # ----------------------------------------------------------------------------------------
 
-# Install Prometheus stack by calling `obs.mak` recursively
-prom:
-	make -f obs.mak init-helm
-	make -f obs.mak install-prom
+# Add the latest active repo for Prometheus
+# Only needs to be done once but is idempotent
+init-helm:
+	$(HELM) repo add prometheus-community https://prometheus-community.github.io/helm-charts
 
-# Install Kiali operator and Kiali by calling `obs.mak` recursively
+# Install Prometheus and Grafana
+install-prom:
+	@echo $(HELM) install $(MON_RELEASE) --namespace $(MONITOR_NS) prometheus-community/kube-prometheus-stack > $(LOG_DIR)/install-prometheus.log
+	$(KC) create namespace $(MONITOR_NS) || true | tee -a $(LOG_DIR)/install-prometheus.log
+	$(KC) label ns $(MONITOR_NS) istio-injection=$(MONITOR_NS_INJECTION) | tee -a $(LOG_DIR)/install-prometheus.log
+	$(HELM) install $(MON_RELEASE) -f helm-kube-stack-values.yaml --namespace $(MONITOR_NS) prometheus-community/kube-prometheus-stack | tee -a $(LOG_DIR)/install-prometheus.log
+	$(KC) apply -n $(MONITOR_NS) -f monitoring-lb-services.yaml | tee -a $(LOG_DIR)/install-prometheus.log
+	$(KC) apply -n $(MONITOR_NS) -f cluster/grafana-flask-configmap.yaml | tee -a $(LOG_DIR)/install-prometheus.log
+
+# Uninstall Prometheus
+uninstall-prom:
+	@echo $(HELM) uninstall $(MON_RELEASE) --namespace $(MONITOR_NS) > $(LOG_DIR)/uninstall-prometheus.log
+	$(HELM) uninstall $(MON_RELEASE) --namespace $(MONITOR_NS) | tee $(LOG_DIR)/uninstall-prometheus.log
+
+# Install Prometheus stack
+prom: init-helm install-prom
+
+# Install Kiali operator and Kiali
 # Waits for Kiali to be created and begin running. This wait is required
 # before installing the three microservices because they
 # depend upon some Custom Resource Definitions (CRDs) added
 # by Kiali
 kiali:
-	make -f obs.mak install-kiali
+	$(KC) create namespace $(KIALI_OP_NS) || true  | tee $(LOG_DIR)/kiali.log
+	$(HELM) install -n $(KIALI_OP_NS) --repo https://kiali.org/helm-charts kiali-operator kiali-operator | tee -a $(LOG_DIR)/kiali.log
+	$(KC) apply -n $(MONITOR_NS) -f kiali-cr.yaml | tee -a $(LOG_DIR)/kiali.log
 	# Kiali operator can take awhile to start Kiali
-	tools/waiteq.sh 'app=kiali' '{.items[*]}'              ''        'Kiali' 'Created'
-	tools/waitne.sh 'app=kiali' '{.items[0].status.phase}' 'Running' 'Kiali' 'Running'
+	tools/waiteq.sh $(MONITOR_NS) 'app=kiali' '{.items[*]}'              ''        'Kiali' 'Created'
+	tools/waitne.sh $(MONITOR_NS) 'app=kiali' '{.items[0].status.phase}' 'Running' 'Kiali' 'Running'
+
+# Uninstall Kiali
+uninstall-kiali:
+	$(KC) delete -n $(MONITOR_NS) kiali/kiali | tee $(LOG_DIR)/uninstall-kiali.log
+	$(HELM) uninstall kiali-operator -n $(KIALI_OP_NS) | tee -a $(LOG_DIR)/uninstall-kiali.log
 
 # Install Istio
 istio:
-	$(IC) install --set profile=demo --set hub=gcr.io/istio-release | tee -a $(LOG_DIR)/mk-reinstate.log
+	$(IC) install --set profile=demo --set hub=gcr.io/istio-release | tee $(LOG_DIR)/istio.log
+	$(KC) label ns default istio-injection=enabled | tee -a $(LOG_DIR)/istio.log
 
 # Create and configure the application namespace
 appns:
@@ -262,11 +294,11 @@ appns:
 
 # Update monitoring virtual service and display result
 monitoring: monvs
-	$(KC) -n $(ISTIO_NS) get vs
+	$(KC) -n $(MONITOR_NS) get vs
 
 # Update monitoring virtual service
 monvs: cluster/monitoring-virtualservice.yaml
-	$(KC) -n $(ISTIO_NS) apply -f $< > $(LOG_DIR)/monvs.log
+	$(KC) -n $(MONITOR_NS) apply -f $< > $(LOG_DIR)/monvs.log
 
 # Update service gateway
 gw: cluster/service-gateway.yaml
@@ -331,7 +363,7 @@ cr:
 # The following may not even work.
 #
 # General Gatling target: Specify CLUSTER_IP, USERS, and SIM_NAME as environment variables. Full output.
-gatling: $(SIM_PACKAGE_DIR)/$(SIM_FILE)
+run-gatling:
 	JAVA_HOME=$(JAVA_HOME) $(GAT) -rsf $(RES_DIR) -sf $(SIM_DIR) -bf $(GAT_DIR)/target/test-classes -s $(SIM_FULL_NAME) -rd "Simulation $(SIM_NAME)" $(GATLING_OPTIONS)
 
 # The following should probably not be used---it starts the job but under most shells
@@ -342,7 +374,7 @@ gatling-music:
 
 # Different approach from gatling-music but the same problems. Probably do not use this.
 gatling-user:
-	@/bin/sh -c 'CLUSTER_IP=$(INGRESS_IP) USERS=$(USERS) SIM_NAME=ReadUserSim make -e -f k8s.mak gatling $(GAT_SUFFIX)'
+	@/bin/sh -c 'CLUSTER_IP=$(INGRESS_IP) USERS=$(USERS) SIM_NAME=ReadUserSim make -e -f k8s.mak run-gatling $(GAT_SUFFIX)'
 
 
 # ---------------------------------------------------------------------------------------

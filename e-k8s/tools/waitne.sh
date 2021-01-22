@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Wait for a condition to become false on a single pod in namespace 'istio-system'
+# Wait for a condition to become false on a single pod in namespace $1
 set -o nounset
 set -o errexit
-if [[ $# -ne 5 ]]
+if [[ $# -ne 6 ]]
 then
-  echo "Must pass five parameters"
+  echo "Must pass six parameters"
   exit 1
 fi
-while [ "$(kubectl get -n istio-system pods -l ${1} -o jsonpath=${2})" != "${3}" ]
+while [ "$(kubectl get -n ${1} pods -l ${2} -o jsonpath=${3})" != "${4}" ]
 do
-    echo "${4} not yet ${5}. Sleeping 1 s"
+    echo "${5} not yet ${6}. Sleeping 1 s"
     sleep 1
 done
-echo "${4} is ${5}"
+echo "${5} is ${6}"
