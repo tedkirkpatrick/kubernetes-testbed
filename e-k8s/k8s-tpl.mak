@@ -61,6 +61,11 @@ MONITOR_NS=monitoring
 MONITOR_NS_INJECTION=disabled
 MON_RELEASE=c756
 
+# Generic parameters---overload via `make -e`
+# Defaults get the Kiali token
+NAMESPACE=$(MONITOR_NS)
+ACCOUNT=kiali-service-account
+
 # ----------------------------------------------------------------------------------------
 # -------  Targets to be invoked directly from command line                        -------
 # ----------------------------------------------------------------------------------------
@@ -231,10 +236,10 @@ GAT_SUFFIX=2>&1 | head -18 &
 gatling-command:
 	@/bin/sh -c 'echo "CLUSTER_IP=$(INGRESS_IP) USERS=1 SIM_NAME=ReadMusicSim make -e -f k8s.mak run-gatling $(GAT_SUFFIX)"'
 
-# --- kiali-svc-token: Get the token
-# SAMPLE:  Has embedded secret name!!!
-kiali-svc-token:
-	$(KC) -n $(MONITOR_NS) get secret/kiali-service-account-token-vt6q5 -o jsonpath='{.data.token}' | base64 -d -
+# --- account-token: Print the token for a service account
+account-token:
+	@# Suppress all output so that token can be redirected into a file
+	@$(KC) -n $(NAMESPACE) get secret/`$(KC) get -n $(NAMESPACE) serviceaccount/$(ACCOUNT) -o jsonpath='{.secrets[0].name}'` -o jsonpath='{.data.token}' | base64 -d -
 
 # ----------------------------------------------------------------------------------------
 # ------- Targets called by above. Not normally invoked directly from command line -------
