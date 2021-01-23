@@ -37,8 +37,9 @@ NUM_NODES=3 # This was default for Google's "My First Cluster"
 # no memory to spare
 #NUM_NODES=2
 
-# This version is supported for us-west2
-KVER=1.19.3
+# Specify the version and channel
+#VER_CHAN=--cluster-version "1.18.12-gke.1200" --release-channel "rapid"
+VER_CHAN=--release-channel "regular"
 
 start:	showcontext
 	date | tee  $(LOG_DIR)/gcp-start.log
@@ -46,7 +47,7 @@ start:	showcontext
 	# The lines up to and including "metadata" are required for 756.
 	# The lines after that may or may not be necessary
 	$(GC) container clusters create $(CLUSTER_NAME) --zone $(ZONE) --num-nodes $(NUM_NODES) \
-	      --cluster-version "1.18.12-gke.1200" --release-channel "rapid" \
+	      $(VER_CHAN) \
 	      --machine-type $(MACHINE_TYPE) --image-type $(IMAGE_TYPE) --disk-type $(DISK_TYPE) --disk-size $(DISK_SIZE) \
 	      --metadata disable-legacy-endpoints=true \
 	      --no-enable-basic-auth \
