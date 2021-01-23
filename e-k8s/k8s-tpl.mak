@@ -274,7 +274,7 @@ prom: init-helm install-prom
 # by Kiali
 kiali:
 	$(KC) create namespace $(KIALI_OP_NS) || true  | tee $(LOG_DIR)/kiali.log
-	$(HELM) install -n $(KIALI_OP_NS) --repo https://kiali.org/helm-charts kiali-operator kiali-operator | tee -a $(LOG_DIR)/kiali.log
+	$(HELM) install -n $(KIALI_OP_NS) --set image.tag=v1.29.0 --repo https://kiali.org/helm-charts kiali-operator kiali-operator | tee -a $(LOG_DIR)/kiali.log
 	$(KC) apply -n $(MONITOR_NS) -f kiali-cr.yaml | tee -a $(LOG_DIR)/kiali.log
 	# Kiali operator can take awhile to start Kiali
 	tools/waiteq.sh $(MONITOR_NS) 'app=kiali' '{.items[*]}'              ''        'Kiali' 'Created'
