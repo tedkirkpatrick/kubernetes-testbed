@@ -29,6 +29,9 @@ AWS=aws
 IC=istioctl
 HELM=helm
 
+# Versions of platform software
+ISTIO_VER=1.7
+
 # Application versions
 # Override these by environment variables and `make -e`
 APP_VER_TAG=v1
@@ -66,6 +69,9 @@ MON_RELEASE=c756
 NAMESPACE=$(MONITOR_NS)
 ACCOUNT=kiali-service-account
 
+# Internal directories that are unlikely to change
+TRACE_DIR=trace
+
 # ----------------------------------------------------------------------------------------
 # -------  Targets to be invoked directly from command line                        -------
 # ----------------------------------------------------------------------------------------
@@ -85,12 +91,12 @@ templates:
 # 1. Templates have been instantiated (make -f k8s-tpl.mak templates)
 # 2. Current context is a running Kubernetes cluster (make -f {az,eks,gcp,mk}.mak start)
 #
-provision: istio prom kiali deploy
+provision: namespaces istio prom jaeger kiali deploy
 
 # --- deploy: Deploy and monitor the three microservices
 # Use `provision` to deploy the entire stack (including Istio, Prometheus, ...).
 # This target only deploys the sample microservices
-deploy: appns gw s1 s2 db monitoring
+deploy: gw s1 s2 db monitoring
 	$(KC) -n $(APP_NS) get gw,vs,deploy,svc,pods
 
 # --- rollout: Rollout new deployments of all microservices
@@ -211,6 +217,11 @@ INGRESS_IP=`$(IP_GET_CMD) $(ISTIO_NS) svc/istio-ingressgateway`
 kiali-url:
 	@/bin/sh -c 'echo http://$(INGRESS_IP)/kiali'
 
+# --- jaeger-url: Print the URL to browse Jaeger in current cluster
+jaeger-url:
+	@# Use back-tick for subshell so as not to confuse with make $() variable notation
+	@/bin/sh -c 'echo http://`$(IP_GET_CMD) $(ISTIO_NS) svc/tracing`/jaeger'
+
 # --- grafana-url: Print the URL to browse Grafana in current cluster
 grafana-url:
 	@# Use back-tick for subshell so as not to confuse with make $() variable notation
@@ -245,6 +256,16 @@ account-token:
 # ------- Targets called by above. Not normally invoked directly from command line -------
 # ----------------------------------------------------------------------------------------
 
+# Create and configure all the namespaces first, to reduce risk of race conditions
+namespaces:
+	@# Append "|| true" so that make continues even when a create namespace fails
+	@# because the namespace already exists
+	$(KC) create namespace $(MONITOR_NS)  || true                                | tee    $(LOG_DIR)/namespaces.log
+	$(KC) create namespace $(KIALI_OP_NS) || true                                | tee -a $(LOG_DIR)/namespaces.log
+	$(KC) create namespace $(APP_NS)      || true                                | tee -a $(LOG_DIR)/namespaces.log
+	$(KC) label  namespace $(MONITOR_NS) istio-injection=$(MONITOR_NS_INJECTION) | tee -a $(LOG_DIR)/namespaces.log
+	$(KC) label  namespace $(APP_NS)     istio-injection=enabled                 | tee -a $(LOG_DIR)/namespaces.log
+
 # Add the latest active repo for Prometheus
 # Only needs to be done once but is idempotent
 init-helm:
@@ -252,20 +273,23 @@ init-helm:
 
 # Install Prometheus and Grafana
 install-prom:
-	@echo $(HELM) install $(MON_RELEASE) --namespace $(MONITOR_NS) prometheus-community/kube-prometheus-stack > $(LOG_DIR)/install-prometheus.log
-	$(KC) create namespace $(MONITOR_NS) || true | tee -a $(LOG_DIR)/install-prometheus.log
-	$(KC) label ns $(MONITOR_NS) istio-injection=$(MONITOR_NS_INJECTION) | tee -a $(LOG_DIR)/install-prometheus.log
+	@echo $(HELM) install $(MON_RELEASE) --namespace $(MONITOR_NS) prometheus-community/kube-prometheus-stack | tee $(LOG_DIR)/install-prometheus.log
 	$(HELM) install $(MON_RELEASE) -f helm-kube-stack-values.yaml --namespace $(MONITOR_NS) prometheus-community/kube-prometheus-stack | tee -a $(LOG_DIR)/install-prometheus.log
 	$(KC) apply -n $(MONITOR_NS) -f monitoring-lb-services.yaml | tee -a $(LOG_DIR)/install-prometheus.log
 	$(KC) apply -n $(MONITOR_NS) -f cluster/grafana-flask-configmap.yaml | tee -a $(LOG_DIR)/install-prometheus.log
 
 # Uninstall Prometheus
 uninstall-prom:
-	@echo $(HELM) uninstall $(MON_RELEASE) --namespace $(MONITOR_NS) > $(LOG_DIR)/uninstall-prometheus.log
-	$(HELM) uninstall $(MON_RELEASE) --namespace $(MONITOR_NS) | tee $(LOG_DIR)/uninstall-prometheus.log
+	@echo $(HELM) uninstall $(MON_RELEASE) --namespace $(MONITOR_NS) | tee    $(LOG_DIR)/uninstall-prometheus.log
+	$(HELM) uninstall $(MON_RELEASE) --namespace $(MONITOR_NS)       | tee -a $(LOG_DIR)/uninstall-prometheus.log
 
 # Install Prometheus stack
 prom: init-helm install-prom
+
+# Install Jaeger tracing tool
+jaeger:
+	@# The YAML file (taken from Istio) already specifies "-n istio-system"
+	$(KC) apply -f cluster/jaeger.yaml | tee $(LOG_DIR)/jaeger.log
 
 # Install Kiali operator and Kiali
 # Waits for Kiali to be created and begin running. This wait is required
@@ -273,8 +297,7 @@ prom: init-helm install-prom
 # depend upon some Custom Resource Definitions (CRDs) added
 # by Kiali
 kiali:
-	$(KC) create namespace $(KIALI_OP_NS) || true  | tee $(LOG_DIR)/kiali.log
-	$(HELM) install -n $(KIALI_OP_NS) --set image.tag=v1.29.0 --repo https://kiali.org/helm-charts kiali-operator kiali-operator | tee -a $(LOG_DIR)/kiali.log
+	$(HELM) install -n $(KIALI_OP_NS) --set image.tag=v1.29.0 --repo https://kiali.org/helm-charts kiali-operator kiali-operator | tee $(LOG_DIR)/kiali.log
 	$(KC) apply -n $(MONITOR_NS) -f kiali-cr.yaml | tee -a $(LOG_DIR)/kiali.log
 	# Kiali operator can take awhile to start Kiali
 	tools/waiteq.sh $(MONITOR_NS) 'app=kiali' '{.items[*]}'              ''        'Kiali' 'Created'
@@ -290,24 +313,17 @@ istio:
 	$(IC) install --set profile=demo --set hub=gcr.io/istio-release | tee $(LOG_DIR)/istio.log
 	$(KC) label ns default istio-injection=enabled | tee -a $(LOG_DIR)/istio.log
 
-# Create and configure the application namespace
-appns:
-	# Appended "|| true" so that make continues even when command fails
-	# because namespace already exists
-	$(KC) create ns $(APP_NS) || true
-	$(KC) label namespace $(APP_NS) --overwrite=true istio-injection=enabled
-
 # Update monitoring virtual service and display result
 monitoring: monvs
 	$(KC) -n $(MONITOR_NS) get vs
 
 # Update monitoring virtual service
 monvs: cluster/monitoring-virtualservice.yaml
-	$(KC) -n $(MONITOR_NS) apply -f $< > $(LOG_DIR)/monvs.log
+	$(KC) -n $(MONITOR_NS) apply -f $< | tee $(LOG_DIR)/monvs.log
 
 # Update service gateway
 gw: cluster/service-gateway.yaml
-	$(KC) -n $(APP_NS) apply -f $< > $(LOG_DIR)/gw.log
+	$(KC) -n $(APP_NS) apply -f $< | tee $(LOG_DIR)/gw.log
 
 # Start DynamoDB at the default read and write rates
 $(LOG_DIR)/dynamodb-start.log: cluster/cloudformationdynamodb.json
@@ -336,17 +352,20 @@ db: $(LOG_DIR)/db.repo.log cluster/awscred.yaml cluster/dynamodb-service-entry.y
 	$(KC) -n $(APP_NS) apply -f cluster/db-vs.yaml | tee -a $(LOG_DIR)/db.log
 
 # Build the s1 service
-$(LOG_DIR)/s1.repo.log: s1/Dockerfile s1/app.py s1/requirements.txt
+$(LOG_DIR)/s1.repo.log: s1/Dockerfile s1/app.py $(TRACE_DIR)/tracing.py s1/requirements.txt
+	/bin/cp -f $(TRACE_DIR)/tracing.py s1
 	$(DK) build -t $(CREG)/$(REGID)/cmpt756s1:$(APP_VER_TAG) s1 | tee $(LOG_DIR)/s1.img.log
 	$(DK) push $(CREG)/$(REGID)/cmpt756s1:$(APP_VER_TAG) | tee $(LOG_DIR)/s1.repo.log
 
 # Build the s2 service
-$(LOG_DIR)/s2-$(S2_VER).repo.log: s2/$(S2_VER)/Dockerfile s2/$(S2_VER)/app.py s2/$(S2_VER)/requirements.txt
+$(LOG_DIR)/s2-$(S2_VER).repo.log: s2/$(S2_VER)/Dockerfile s2/$(S2_VER)/app.py $(TRACE_DIR)/tracing.py s2/$(S2_VER)/requirements.txt
+	/bin/cp -f $(TRACE_DIR)/tracing.py s2/$(S2_VER)
 	$(DK) build -t $(CREG)/$(REGID)/cmpt756s2:$(S2_VER) s2/$(S2_VER) | tee $(LOG_DIR)/s2-$(S2_VER).img.log
 	$(DK) push $(CREG)/$(REGID)/cmpt756s2:$(S2_VER) | tee $(LOG_DIR)/s2-$(S2_VER).repo.log
 
 # Build the db service
 $(LOG_DIR)/db.repo.log: db/Dockerfile db/app.py db/requirements.txt
+	/bin/cp -f $(TRACE_DIR)/tracing.py db
 	$(DK) build -t $(CREG)/$(REGID)/cmpt756db:$(APP_VER_TAG) db | tee $(LOG_DIR)/db.img.log
 	$(DK) push $(CREG)/$(REGID)/cmpt756db:$(APP_VER_TAG) | tee $(LOG_DIR)/db.repo.log
 

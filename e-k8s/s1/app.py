@@ -22,12 +22,18 @@ import requests
 
 import simplejson as json
 
-# The application
+# Local libraries
+import tracing
+
+
+# --- The application
 
 app = Flask(__name__)
 
 metrics = PrometheusMetrics(app)
 metrics.info('app_info', 'User process')
+
+tracer = tracing.SimpleTracer("s1")
 
 bp = Blueprint('app', __name__)
 
@@ -63,8 +69,9 @@ def readiness():
 
 
 @bp.route('/<user_id>', methods=['PUT'])
+@tracer.trace()
 def update_user(user_id):
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     if 'Authorization' not in headers:
         return Response(json.dumps({"error": "missing auth"}), status=401,
@@ -79,18 +86,21 @@ def update_user(user_id):
     url = db['name'] + '/' + db['endpoint'][3]
     response = requests.put(
         url,
+        headers=headers,
         params={"objtype": "user", "objkey": user_id},
         json={"email": email, "fname": fname, "lname": lname})
     return (response.json())
 
 
 @bp.route('/', methods=['POST'])
+@tracer.trace()
 def create_user():
     """
     Create a user.
     If a record already exists with the same fname, lname, and email,
     the old UUID is replaced with a new one.
     """
+    headers = tracer.getForwardHeaders(request)
     try:
         content = request.get_json()
         lname = content['lname']
@@ -101,6 +111,7 @@ def create_user():
     url = db['name'] + '/' + db['endpoint'][1]
     response = requests.post(
         url,
+        headers=headers,
         json={"objtype": "user",
               "lname": lname,
               "email": email,
@@ -109,8 +120,9 @@ def create_user():
 
 
 @bp.route('/<user_id>', methods=['DELETE'])
+@tracer.trace()
 def delete_user(user_id):
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     if 'Authorization' not in headers:
         return Response(json.dumps({"error": "missing auth"}),
@@ -118,14 +130,17 @@ def delete_user(user_id):
                         mimetype='application/json')
     url = db['name'] + '/' + db['endpoint'][2]
 
-    response = requests.delete(url,
-                               params={"objtype": "user", "objkey": user_id})
+    response = requests.delete(
+        url,
+        headers=headers,
+        params={"objtype": "user", "objkey": user_id})
     return (response.json())
 
 
 @bp.route('/<user_id>', methods=['GET'])
+@tracer.trace()
 def get_user(user_id):
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     if 'Authorization' not in headers:
         return Response(
@@ -134,19 +149,27 @@ def get_user(user_id):
             mimetype='application/json')
     payload = {"objtype": "user", "objkey": user_id}
     url = db['name'] + '/' + db['endpoint'][0]
-    response = requests.get(url, params=payload)
+    response = requests.get(
+        url,
+        headers=headers,
+        params=payload)
     return (response.json())
 
 
 @bp.route('/login', methods=['PUT'])
+@tracer.trace()
 def login():
+    headers = tracer.getForwardHeaders(request)
     try:
         content = request.get_json()
         uid = content['uid']
     except Exception:
         return json.dumps({"message": "error reading parameters"})
     url = db['name'] + '/' + db['endpoint'][0]
-    response = requests.get(url, params={"objtype": "user", "objkey": uid})
+    response = requests.get(
+        url,
+        headers=headers,
+        params={"objtype": "user", "objkey": uid})
     data = response.json()
     if len(data['Items']) > 0:
         encoded = jwt.encode({'user_id': uid, 'time': time.time()},
@@ -156,6 +179,7 @@ def login():
 
 
 @bp.route('/logoff', methods=['PUT'])
+@tracer.trace()
 def logoff():
     try:
         content = request.get_json()

@@ -613,7 +613,7 @@ spec:
     tracing:
       auth:
         type: "none"
-      enabled: false
+      enabled: true
 
 ##########
 #  ---

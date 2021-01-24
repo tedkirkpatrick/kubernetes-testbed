@@ -20,6 +20,10 @@ import requests
 
 import simplejson as json
 
+# Local libraries
+import tracing
+
+
 # The application
 
 # Integer value 0 <= v < 100, denoting proportion of
@@ -30,6 +34,8 @@ app = Flask(__name__)
 
 metrics = PrometheusMetrics(app)
 metrics.info('app_info', 'Music process')
+
+tracer = tracing.SimpleTracer("s2")
 
 db = {
     "name": "http://cmpt756db:30002/api/v1/datastore",
@@ -55,8 +61,9 @@ def readiness():
 
 
 @bp.route('/', methods=['GET'])
+@tracer.trace()
 def list_all():
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     if 'Authorization' not in headers:
         return Response(json.dumps({"error": "missing auth"}),
@@ -67,8 +74,9 @@ def list_all():
 
 
 @bp.route('/<music_id>', methods=['GET'])
+@tracer.trace()
 def get_song(music_id):
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     if 'Authorization' not in headers:
         return Response(json.dumps({"error": "missing auth"}),
@@ -85,14 +93,15 @@ def get_song(music_id):
     url = db['name'] + '/' + db['endpoint'][0]
     response = requests.get(
         url,
-        params=payload,
-        headers={'Authorization': headers['Authorization']})
+        headers=headers,
+        params=payload)
     return (response.json())
 
 
 @bp.route('/', methods=['POST'])
+@tracer.trace()
 def create_song():
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     if 'Authorization' not in headers:
         return Response(json.dumps({"error": "missing auth"}),
@@ -107,14 +116,15 @@ def create_song():
     url = db['name'] + '/' + db['endpoint'][1]
     response = requests.post(
         url,
-        json={"objtype": "music", "Artist": Artist, "SongTitle": SongTitle},
-        headers={'Authorization': headers['Authorization']})
+        headers=headers,
+        json={"objtype": "music", "Artist": Artist, "SongTitle": SongTitle})
     return (response.json())
 
 
 @bp.route('/<music_id>', methods=['DELETE'])
+@tracer.trace()
 def delete_song(music_id):
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     if 'Authorization' not in headers:
         return Response(json.dumps({"error": "missing auth"}),
@@ -123,8 +133,8 @@ def delete_song(music_id):
     url = db['name'] + '/' + db['endpoint'][2]
     response = requests.delete(
         url,
-        params={"objtype": "music", "objkey": music_id},
-        headers={'Authorization': headers['Authorization']})
+        headers=headers,
+        params={"objtype": "music", "objkey": music_id})
     return (response.json())
 
 

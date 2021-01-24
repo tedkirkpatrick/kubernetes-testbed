@@ -7,10 +7,13 @@ Flask==1.1.2
 idna==2.10
 isort==4.3.21
 itsdangerous==1.1.0
+jaeger-client==3.13.0
 Jinja2==2.11.2
 lazy-object-proxy==1.4.3
 MarkupSafe==1.1.1
 mccabe==0.6.1
+opentracing==1.2.2
+opentracing-instrumentation==2.4.3
 pylint==2.5.3
 requests==2.24.0
 simplejson==3.17.2

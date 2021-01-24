@@ -25,12 +25,18 @@ from prometheus_flask_exporter import PrometheusMetrics
 
 import simplejson as json
 
-# The application
+# Local libraries
+import tracing
+
+
+# --- The application
 
 app = Flask(__name__)
 
 metrics = PrometheusMetrics(app)
 metrics.info('app_info', 'Database process')
+
+tracer = tracing.SimpleTracer("db")
 
 bp = Blueprint('app', __name__)
 
@@ -68,8 +74,9 @@ else:
 # Change the implementation of this: you should probably have a separate
 # driver class for interfacing with a db like dynamodb in a different file.
 @bp.route('/update', methods=['PUT'])
+@tracer.trace()
 def update():
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     content = request.get_json()
     objtype = urllib.parse.unquote_plus(request.args.get('objtype'))
@@ -92,8 +99,9 @@ def update():
 
 
 @bp.route('/read', methods=['GET'])
+@tracer.trace()
 def read():
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     objtype = urllib.parse.unquote_plus(request.args.get('objtype'))
     objkey = urllib.parse.unquote_plus(request.args.get('objkey'))
@@ -106,8 +114,9 @@ def read():
 
 
 @bp.route('/write', methods=['POST'])
+@tracer.trace()
 def write():
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     content = request.get_json()
     table_name = content['objtype'].capitalize()
@@ -189,8 +198,9 @@ def load():
 
 
 @bp.route('/delete', methods=['DELETE'])
+@tracer.trace()
 def delete():
-    headers = request.headers
+    headers = tracer.getForwardHeaders(request)
     # check header here
     objtype = urllib.parse.unquote_plus(request.args.get('objtype'))
     objkey = urllib.parse.unquote_plus(request.args.get('objkey'))
