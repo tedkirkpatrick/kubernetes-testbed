@@ -55,6 +55,89 @@ object RUser {
 }
 
 /*
+  Infinite loop that proceeds through all possible calls
+  for the user table: create, login, logoff, read, update, delete.
+
+  Note: Although the login call records the authorization token
+  in ${user_id}, that value is not then used for the Authorization
+  header.  A standard value is always passed instead (see class
+  ReadTablesSim for the value).
+*/
+object AllUserCalls {
+
+  val all_user_calls = forever("i") {
+    exec(http("CreateUser")
+      .post("/api/v1/user/")
+      .body(StringBody(""" { "fname": "First${i}", "lname": "Last${i}", "email": "email${i}@sfu.ca" } """)).asJson
+      .check(jsonPath("$..user_id").saveAs("user_id"))
+      )
+    .pause(1)
+
+    .exec(http("LoginUser")
+      .put("/api/v1/user/login")
+      .body(StringBody(""" { "uid": "${user_id}" } """)).asJson
+      .check(bodyString.saveAs("auth"))
+      )
+    .pause(1)
+
+    .exec(http("LogoffUser")
+      .put("/api/v1/user/logoff")
+      .body(StringBody(""" { "jwt": "${auth}" } """)).asJson
+      )
+    .pause(1)
+
+    .exec(http("ReadUser")
+      .get("/api/v1/user/${user_id}")
+      )
+    .pause(1)
+
+    .exec(http("UpdateUser")
+      .put("/api/v1/user/${user_id}")
+      .body(StringBody(""" { "fname": "First-up-${i}", "lname": "Last-up-${i}", "email": "email.up.${i}@sfu.ca" } """)).asJson
+      )
+    .pause(1)
+
+    .exec(http("DeleteUser")
+      .delete("/api/v1/user/${user_id}")
+      )
+    .pause(1)
+
+  }
+
+}
+
+/*
+  Infinite loop that proceeds through most calls
+  for the music table: create, read, delete.
+
+  Although a list_all call is also specified in the current
+  code, it is not implemented and so is not called by this class.
+*/
+object AllMusicCalls {
+
+  val all_music_calls = forever("i") {
+    exec(http("CreateSong")
+      .post("/api/v1/music/")
+      .body(StringBody(""" { "Artist": "Artist${i}", "SongTitle": "Title${i}" } """)).asJson
+      .check(jsonPath("$..music_id").saveAs("music_id"))
+      )
+    .pause(1)
+
+    .exec(http("ReadSong")
+      .get("/api/v1/music/${music_id}")
+      )
+    .pause(1)
+
+    .exec(http("DeleteMusic")
+      .delete("/api/v1/music/${music_id}")
+      )
+    .pause(1)
+
+  }
+
+}
+
+/*
   After one S1 read, pause a random time between 1 and 60 s
 */
 object RUserVarying {
@@ -131,6 +214,30 @@ class ReadMusicSim extends ReadTablesSim {
 
   setUp(
     scnReadMusic.inject(atOnceUsers(Utility.envVarToInt("USERS", 1)))
+  ).protocols(httpProtocol)
+}
+
+/*
+  Run through all calls to the user service.
+*/
+class AllUserCalls extends ReadTablesSim {
+  val scnAllUserCalls = scenario("AllUserCalls")
+    .exec(AllUserCalls.all_user_calls)
+
+  setUp(
+    scnAllUserCalls.inject(atOnceUsers(Utility.envVarToInt("USERS", 1)))
+  ).protocols(httpProtocol)
+}
+
+/*
+  Run through all calls to the music service.
+*/
+class AllMusicCalls extends ReadTablesSim {
+  val scnAllMusicCalls = scenario("AllMusicCalls")
+    .exec(AllMusicCalls.all_music_calls)
+
+  setUp(
+    scnAllMusicCalls.inject(atOnceUsers(Utility.envVarToInt("USERS", 1)))
   ).protocols(httpProtocol)
 }
 
