@@ -38,8 +38,9 @@ NUM_NODES=3 # This was default for Google's "My First Cluster"
 #NUM_NODES=2
 
 # Specify the version and channel
+KVER=1.18.12-gke.1205
 #VER_CHAN=--cluster-version "1.18.12-gke.1200" --release-channel "rapid"
-VER_CHAN=--release-channel "regular"
+VER_CHAN=--cluster-version "$(KVER)" --release-channel "regular"
 
 start:	showcontext
 	date | tee  $(LOG_DIR)/gcp-start.log
