@@ -478,7 +478,9 @@ spec:
 
     grafana:
       auth:
-        type: none
+        type: basic
+        username: admin
+        password: prom-operator
       in_cluster_url: "http://c756-grafana.monitoring.svc.cluster.local:80"
 
 # **Istio-specific settings:
