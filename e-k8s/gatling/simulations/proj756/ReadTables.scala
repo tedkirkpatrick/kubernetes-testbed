@@ -34,7 +34,7 @@ object RMusic {
 
   val rmusic = forever("i") {
     feed(feeder)
-    .exec(http("RMusic ${i}")
+    .exec(http("RMusic")
       .get("/api/v1/music/${UUID}"))
       .pause(1)
   }
@@ -47,7 +47,7 @@ object RUser {
 
   val ruser = forever("i") {
     feed(feeder)
-    .exec(http("RUser ${i}")
+    .exec(http("RUser")
       .get("/api/v1/user/${UUID}"))
     .pause(1)
   }
@@ -145,7 +145,7 @@ object RUserVarying {
 
   val ruser = forever("i") {
     feed(feeder)
-    .exec(http("RUserVarying ${i}")
+    .exec(http("RUserVarying")
       .get("/api/v1/user/${UUID}"))
     .pause(1, 60)
   }
@@ -160,7 +160,7 @@ object RMusicVarying {
 
   val rmusic = forever("i") {
     feed(feeder)
-    .exec(http("RMusicVarying ${i}")
+    .exec(http("RMusicVarying")
       .get("/api/v1/music/${UUID}"))
     .pause(1, 60)
   }
