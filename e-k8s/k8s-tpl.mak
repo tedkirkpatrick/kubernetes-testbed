@@ -41,6 +41,7 @@ LOADER_VER=v1
 # Gatling parameters to be overridden by environment variables and `make -e`
 SIM_NAME=ReadUserSim
 USERS=1
+JOB_NAME=SecondGatlingJob
 
 # Gatling parameters that most of the time will be unchanged
 # but which you might override as projects become sophisticated
@@ -179,8 +180,8 @@ showcontext:
 # Run the loader, rebuilding if necessary, starting DynamDB if necessary, building ConfigMaps
 loader: dynamodb-start $(LOG_DIR)/loader.repo.log cluster/loader.yaml
 	$(KC) -n $(APP_NS) delete --ignore-not-found=true jobs/cmpt756loader
-	tools/build-configmap.sh $(RES_DIR)/users.csv cluster/users-header.yaml | kubectl -n $(APP_NS) apply -f -
-	tools/build-configmap.sh $(RES_DIR)/music.csv cluster/music-header.yaml | kubectl -n $(APP_NS) apply -f -
+	tools/build-configmap.sh cluster/users-header.yaml $(RES_DIR)/users.csv | kubectl -n $(APP_NS) apply -f -
+	tools/build-configmap.sh cluster/music-header.yaml $(RES_DIR)/music.csv | kubectl -n $(APP_NS) apply -f -
 	$(KC) -n $(APP_NS) apply -f cluster/loader.yaml | tee $(LOG_DIR)/loader.log
 
 # --- dynamodb-start: Start the AWS DynamoDB service
@@ -203,6 +204,24 @@ ls-tables:
 registry-login:
 	# Use '@' to suppress echoing the $CR_PAT to screen
 	@/bin/sh -c 'echo ${CR_PAT} | $(DK) login $(CREG) -u $(REGID) --password-stdin'
+
+# --- gatling-cluster-start: Run Gatling on the cluster
+# NOTE: Unlike local Gatling calls, this only requires that USERS and SIM_NAME be
+# defined. CLUSTER_IP is not required and will be ignored if present.
+#
+gatling-cluster-start:
+	$(KC) -n $(APP_NS) delete --ignore-not-found=true job/gatling
+	tools/build-configmap.sh cluster/gatling-resources-header.yaml gatling/resources/users.csv gatling/resources/music.csv | $(KC) -n $(APP_NS) apply -f -
+	tools/build-configmap.sh cluster/gatling-sims-header.yaml gatling/simulations/proj756/ReadTables.scala | $(KC) -n $(APP_NS) apply -f -
+	tools/set-gatling-params.sh $(USERS) $(SIM_NAME) | $(KC) -n $(APP_NS) apply -f -
+
+# --- gatling-cluster-more: Run a second (or more) Gatling Job on the cluster
+# Only run this target AFTER a first call to gatling-cluster-start.
+# Requires that USERS, SIM_NAME, and JOB_NAME be defined.
+# CLUSTER_IP is not required and will be ignored if present.
+#
+gatling-cluster-more:
+	tools/set-gatling-params.sh $(USERS) $(SIM_NAME) | tools/set-gatling-job-name.sh $(JOB_NAME) | $(KC) -n $(APP_NS) apply -f -
 
 # --- Variables defined for URL targets
 # Utility to get the hostname (AWS) or ip (everyone else) of a load-balanced service

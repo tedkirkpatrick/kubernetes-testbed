@@ -1,0 +1,6 @@
+# Header for ConfigMap containing Gatling resources
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gatling-resources
+data:

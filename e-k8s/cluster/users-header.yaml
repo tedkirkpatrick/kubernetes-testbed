@@ -4,4 +4,3 @@ kind: ConfigMap
 metadata:
   name: users
 data:
-  users.csv: |

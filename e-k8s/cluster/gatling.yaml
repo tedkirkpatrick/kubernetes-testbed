@@ -1,0 +1,87 @@
+# Kubernetes yaml to deploy Gatling
+# Often run through tools/set-gatling-params.sh to
+# override the user count and the script to run.
+#
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: svc-gatling
+  labels:
+    account: SVC_GATLING
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gatling
+  labels:
+    app: gatling
+spec:
+  template:
+    metadata:
+      labels:
+        app: gatling
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: svc-gatling
+      # initContainer to copy gatling scripts
+      #
+      # Gatling has an odd limitation: It cannot correctly compile a script
+      # directly from a ConfigMap.  In such cases, it sees two copies of the script,
+      # producing duplicate-definition errors for every id.
+      # To avoid this, define an initContainer that copies the script from the
+      # ConfigMap to a temporary volume, gatling-sims-copy.  For whatever reason, Gatling can
+      # read the script correctly from that temporary volume.  (Shrug-emoji)
+      # A method similar to this was used by another writer:
+      # http://performance-related.blogspot.com/2019/03/performance-test-with-gatling-in-cloud.html
+      initContainers:
+      - name: sim-copy
+        imagePullPolicy: IfNotPresent
+        image: ghcr.io/tedkirkpatrick/gatling:3.4.2
+        command:
+        - /bin/cp
+        - /opt/gatling/user-files/orig/ReadTables.scala
+        - /opt/gatling/user-files/simulations/proj756/ReadTables.scala
+        volumeMounts:
+        - name: gatling-sims-orig
+          mountPath: "/opt/gatling/user-files/orig"
+          readOnly: false
+        - name: gatling-sims-copy
+          mountPath: "/opt/gatling/user-files/simulations/proj756"
+          readOnly: false
+      containers:
+      - name: gatling
+        imagePullPolicy: IfNotPresent
+        image: ghcr.io/tedkirkpatrick/gatling:3.4.2
+        args:
+        - -s
+        - proj756.ReadBothVaryingSim
+        env:
+        - name: CLUSTER_IP
+          value: "istio-ingressgateway.istio-system.svc.cluster.local"
+        - name: USERS
+          value: 1
+        volumeMounts:
+        - name: gatling-sims-copy
+          mountPath: "/opt/gatling/user-files/simulations/proj756"
+          readOnly: true
+        - name: resources
+          mountPath: "/opt/gatling/user-files/resources"
+          readOnly: true
+        #- name: results
+        #  mountPath: "/opt/gatling/results"
+        #  readOnly: false
+        #- name: target
+        #  mountPath: "/opt/gatling/target"
+        #  readOnly: false
+      volumes:
+      - name: gatling-sims-orig
+        configMap:
+          name: gatling-sims
+      - name: gatling-sims-copy
+        emptyDir: {}
+      - name: resources
+        configMap:
+          name: gatling-resources
+      restartPolicy: Never
+  backoffLimit: 0

@@ -1,0 +1,6 @@
+# Header for ConfigMap containing Gatling simulations
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gatling-sims
+data:
