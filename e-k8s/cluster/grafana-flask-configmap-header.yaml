@@ -1,0 +1,11 @@
+# Flask dashboard to be loaded into Grafana by sidecar `kiwigrid/k8s-sidecar`
+# See
+# https://github.com/grafana/helm-charts/tree/main/charts/grafana#sidecar-for-dashboards
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c756-dashboard
+  labels:
+     # Sidecar loads all ConfigMaps with this label
+     grafana_dashboard: "1"
+data:
